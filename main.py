@@ -7,6 +7,9 @@ from functions.get_files_info import schema_get_files_info
 from functions.get_file_content import schema_get_file_content
 from functions.run_python_file import schema_run_python_file
 from functions.write_file import schema_write_file
+from functions.call_function import call_function
+from config import MAX_ITERATIONS
+
 
 def main():    
     load_dotenv()
@@ -44,25 +47,40 @@ def main():
                                                             schema_write_file,
                                                             schema_run_python_file])
     agent_config = types.GenerateContentConfig(tools=[available_functions], system_instruction=system_prompt)
-    response = client.models.generate_content(model=model_name, 
-                                              contents=messages,
-                                              config=agent_config,
-                                              )
     
-    if response is None or response.usage_metadata is None:
-        print("Response is malformed.")
-        return
-    
-    if verbose:
-        print(f"User prompt: {messages}")
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
-    
-    if response.function_calls:
-        for function_call_part in response.function_calls:
-            print(f"Calling function: {function_call_part.name}({function_call_part.args})")
-    else:
-        print(response.text)    
+    for i in range(0, MAX_ITERATIONS):
+        response = client.models.generate_content(model=model_name, 
+                                                contents=messages,
+                                                config=agent_config,
+                                                )
+        
+        if response is None or response.usage_metadata is None:
+            print("Response is malformed.")
+            return
+        
+        if verbose:
+            print(f"User prompt: {messages}")
+            print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+            print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+        
+        if response.candidates:
+            for candidate in response.candidates:
+                if candidate is None or candidate.content is None:
+                    continue
+                messages.append(candidate.content)
+        if response.function_calls:
+            for function_call_part in response.function_calls:
+                try:
+                    result = call_function(function_call_part, verbose=verbose)
+                    messages.append(result)
+                    if verbose:
+                        print(result.parts[0].function_response.response["result"])
+                except Exception as e:
+                    raise Exception("This does not work")
+        else:
+            # Final agent text message
+            print(response.text)
+            return
     
 if __name__ == "__main__":
     main()
